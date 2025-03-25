@@ -1,6 +1,5 @@
 package com.myorg;
 
-import software.amazon.awscdk.services.apigateway.CorsOptions;
 import software.amazon.awscdk.services.apigateway.IntegrationOptions;
 import software.amazon.awscdk.services.apigateway.IntegrationResponse;
 import software.amazon.awscdk.services.apigateway.LambdaIntegration;
@@ -11,6 +10,8 @@ import software.amazon.awscdk.services.apigateway.MockIntegration;
 import software.amazon.awscdk.services.apigateway.PassthroughBehavior;
 import software.amazon.awscdk.services.apigateway.Resource;
 import software.amazon.awscdk.services.apigateway.RestApi;
+import software.amazon.awscdk.services.iam.Effect;
+import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.lambda.Code;
 import software.amazon.awscdk.services.lambda.Function;
 import software.amazon.awscdk.services.lambda.Runtime;
@@ -18,6 +19,7 @@ import software.constructs.Construct;
 import software.amazon.awscdk.Stack;
 import software.amazon.awscdk.StackProps;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +40,15 @@ public class AiInterviewAssistCdkStack extends Stack {
                 .memorySize(512)
                 .timeout(software.amazon.awscdk.Duration.seconds(300))
                 .build();
+
+        aIInterviewAssistFunction.addToRolePolicy(PolicyStatement.Builder.create()
+                .effect(Effect.ALLOW)
+                .actions(Arrays.asList(
+                        "bedrock:InvokeModel",
+                        "bedrock:ListFoundationModels"
+                ))
+                .resources(List.of("*"))
+                .build());
 
         // Create API Gateway
         RestApi api = RestApi.Builder.create(this, "InterviewAssistApi")
