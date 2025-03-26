@@ -1,6 +1,7 @@
 package resources;
 
 import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -29,48 +30,12 @@ public class AiInterviewAssistLambdaHandler implements RequestHandler<Map<String
         this.objectMapper = new ObjectMapper();
     }
 
-    private String invokeNova(String prompt) {
-        try {
-            // Build the request body as JSON
-            ObjectNode requestBody = objectMapper.createObjectNode();
-
-            // Add inferenceConfig
-            requestBody.putObject("inferenceConfig")
-                    .put("maxTokens", 500)
-                    .put("temperature", 0.5F); // Adjusts randomness
-
-            // Add messages array
-            ArrayNode messages = requestBody.putArray("messages");
-            ObjectNode message = messages.addObject();
-            message.put("role", "user");
-
-            // Add content array to the message
-            ArrayNode content = message.putArray("content");
-            content.addObject().put("text", prompt);
-
-            // Convert request body to JSON string
-            String requestBodyString = objectMapper.writeValueAsString(requestBody);
-
-            // Invoke the model
-            InvokeModelResponse response = bedrockClient.invokeModel(InvokeModelRequest.builder()
-                    .modelId(NOVA_MODEL_ID)
-                    .contentType("application/json")
-                    .accept("application/json")
-                    .body(SdkBytes.fromString(requestBodyString, StandardCharsets.UTF_8))
-                    .build());
-
-            // Parse and return response text
-            return objectMapper.readTree(response.body().asUtf8String())
-                    .path("messages").path(0).path("content").path(0).path("text").asText();
-
-        } catch (Exception e) {
-            throw new RuntimeException("Error invoking Amazon Nova: " + e.getMessage(), e);
-        }
-    }
-
 
     @Override
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
+        LambdaLogger logger = context.getLogger();
+
+        logger.log("Starting Lambda: " + input.toString());
         Map<String, Object> response = new HashMap<>();
         Map<String, String> headers = new HashMap<>();
 
@@ -82,13 +47,55 @@ public class AiInterviewAssistLambdaHandler implements RequestHandler<Map<String
 
         try {
             // Extract prompt from input
-            String prompt = (String) input.get("prompt");
+            Object promptBody = input.get("body");
+            String prompt = promptBody != null ? objectMapper.readTree(promptBody.toString()).path("prompt").asText() : null;
             if (prompt == null || prompt.trim().isEmpty()) {
+                logger.log("Prompt cannot be empty");
                 throw new IllegalArgumentException("Prompt cannot be empty");
             }
 
             // Invoke Nova and get response
-            String novaResponse = invokeNova(prompt);
+            String novaResponse;
+            try {
+                // Build the request body as JSON
+                ObjectNode requestBody = objectMapper.createObjectNode();
+
+                // Add inferenceConfig
+                requestBody.putObject("inferenceConfig")
+                        .put("maxTokens", 500)
+                        .put("temperature", 0.5F); // Adjusts randomness
+
+                // Add messages array
+                ArrayNode messages = requestBody.putArray("messages");
+                ObjectNode message = messages.addObject();
+                message.put("role", "user");
+
+                // Add content array to the message
+                ArrayNode content = message.putArray("content");
+                content.addObject().put("text", prompt);
+
+                // Convert request body to JSON string
+                String requestBodyString = objectMapper.writeValueAsString(requestBody);
+
+                // Invoke the model
+                InvokeModelResponse invokeModelResponse = bedrockClient.invokeModel(InvokeModelRequest.builder()
+                        .modelId(NOVA_MODEL_ID)
+                        .contentType("application/json")
+                        .accept("application/json")
+                        .body(SdkBytes.fromString(requestBodyString, StandardCharsets.UTF_8))
+                        .build());
+
+                logger.log("Response from Nova: " + invokeModelResponse.body().asUtf8String());
+                // Parse and return response text
+                novaResponse = objectMapper.readTree(invokeModelResponse.body().asUtf8String())
+                        .path("output").path("message").path("content").path(0).path("text").asText();
+
+                logger.log("Parsed response: " + novaResponse);
+
+            } catch (Exception e) {
+                logger.log("Error invoking Amazon Nova: " + e.getMessage());
+                throw new RuntimeException("Error invoking Amazon Nova: " + e.getMessage(), e);
+            }
 
             // Prepare success response
             response.put("statusCode", 200);
@@ -98,6 +105,7 @@ public class AiInterviewAssistLambdaHandler implements RequestHandler<Map<String
             ));
 
         } catch (Exception e) {
+            logger.log("Error processing request: " + e);
             // Handle errors
             response.put("statusCode", 500);
             response.put("headers", headers);
@@ -110,6 +118,7 @@ public class AiInterviewAssistLambdaHandler implements RequestHandler<Map<String
             }
         }
 
+        logger.log("Ending Lambda: " + response);
         return response;
     }
 }
